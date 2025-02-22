@@ -1,7 +1,8 @@
 import axios from 'axios';
-import { JSDOM } from 'jsdom';
 import { DocumentationDB } from './db.js';
 import { Octokit } from '@octokit/rest';
+import { DocsRsParser } from './parsers/docsRsParser.js';
+import { AwesomeLeptosParser } from './parsers/awesomeLeptosParser.js';
 export class DocFetcher {
     constructor() {
         this.db = DocumentationDB.getInstance();
@@ -11,29 +12,20 @@ export class DocFetcher {
     }
     async fetchLeptosDocs() {
         try {
-            // Fetch official docs
+            // Fetch and parse official docs
+            console.log('Fetching Leptos docs from docs.rs...');
             const officialDocs = await axios.get('https://docs.rs/leptos/latest/leptos/');
-            const dom = new JSDOM(officialDocs.data);
-            const document = dom.window.document;
-            // Process and store official documentation
-            const modules = document.querySelectorAll('.module-item');
-            for (const module of modules) {
-                const title = module.querySelector('.module-item-title')?.textContent || '';
-                const content = module.querySelector('.docblock')?.textContent || '';
-                await this.db.addDocument({
-                    crate: 'leptos',
-                    version: 'latest',
-                    title,
-                    content,
-                    category: 'api',
-                    framework: 'leptos',
-                    tags: ['official', 'api'],
-                    examples: [],
-                    created_at: new Date(),
-                    updated_at: new Date()
-                });
+            console.log('Response status:', officialDocs.status);
+            console.log('Response data preview:', officialDocs.data.slice(0, 500));
+            console.log('Parsing Leptos documentation...');
+            const docsItems = await DocsRsParser.parse(officialDocs.data, 'leptos', 'latest');
+            console.log('Parsed items count:', docsItems.length);
+            console.log('First item preview:', docsItems[0]);
+            // Store official documentation
+            for (const item of docsItems) {
+                await this.db.addDocument(item);
             }
-            // Fetch awesome-leptos examples
+            // Fetch and parse awesome-leptos examples
             const { data: awesomeLeptos } = await this.octokit.repos.getContent({
                 owner: 'leptos-rs',
                 repo: 'awesome-leptos',
@@ -41,34 +33,19 @@ export class DocFetcher {
             });
             if ('content' in awesomeLeptos) {
                 const content = Buffer.from(awesomeLeptos.content, 'base64').toString();
-                const sections = content.split('\n## ');
-                for (const section of sections) {
-                    const [title, ...items] = section.split('\n');
-                    const examples = items
-                        .filter(item => item.startsWith('- ['))
-                        .map(item => {
-                        const matches = item.match(/\[(.*?)\]\((.*?)\)/);
-                        return matches ? { title: matches[1], url: matches[2] } : null;
-                    })
-                        .filter(item => item !== null);
-                    if (examples.length > 0) {
-                        await this.db.addDocument({
-                            crate: 'leptos',
-                            version: 'latest',
-                            title: title.trim(),
-                            content: examples.map(e => `${e.title}: ${e.url}`).join('\n'),
-                            category: 'examples',
-                            framework: 'leptos',
-                            tags: ['community', 'examples'],
-                            examples: examples.map(e => e.url),
-                            created_at: new Date(),
-                            updated_at: new Date()
-                        });
-                    }
+                // Parse awesome-leptos content
+                const communityItems = await AwesomeLeptosParser.parse(content);
+                for (const item of communityItems) {
+                    await this.db.addDocument(item);
+                }
+                // Extract and store patterns
+                const patterns = await AwesomeLeptosParser.extractPatterns(communityItems);
+                for (const pattern of patterns) {
+                    await this.db.addDocument(pattern);
                 }
             }
-            // Fetch common patterns and store them
-            await this.storeCommonPatterns();
+            // Fetch and store error patterns
+            await this.fetchErrorPatterns();
         }
         catch (error) {
             console.error('Error fetching Leptos docs:', error);
@@ -79,108 +56,127 @@ export class DocFetcher {
         try {
             // Fetch official Tauri docs
             const officialDocs = await axios.get('https://tauri.app/v1/api/js');
-            const dom = new JSDOM(officialDocs.data);
-            const document = dom.window.document;
-            // Process API documentation
-            const apiSections = document.querySelectorAll('.api-section');
-            for (const section of apiSections) {
-                const title = section.querySelector('h2')?.textContent || '';
-                const content = section.querySelector('.content')?.textContent || '';
-                const examples = Array.from(section.querySelectorAll('pre code'))
-                    .map(code => code.textContent || '');
-                await this.db.addDocument({
-                    crate: 'tauri',
-                    version: 'v1',
-                    title,
-                    content,
-                    category: 'api',
-                    framework: 'tauri',
-                    tags: ['official', 'api'],
-                    examples,
-                    created_at: new Date(),
-                    updated_at: new Date()
-                });
+            const docsItems = await DocsRsParser.parse(officialDocs.data, 'tauri', 'v1');
+            // Store official documentation
+            for (const item of docsItems) {
+                await this.db.addDocument(item);
             }
-            // Store common error patterns
-            await this.storeCommonErrors();
+            // Fetch and store error patterns
+            await this.fetchErrorPatterns();
+            // Fetch and store integration patterns
+            await this.fetchIntegrationPatterns();
         }
         catch (error) {
             console.error('Error fetching Tauri docs:', error);
             throw error;
         }
     }
-    async storeCommonPatterns() {
-        const patterns = [
-            {
-                name: 'Signal Component Pattern',
-                description: 'Pattern for creating a component with reactive state using signals',
-                code_template: `
-#[component]
-fn MyComponent() -> impl IntoView {
-    let (count, set_count) = create_signal(0);
-    
-    view! {
-        <div>
-            <button on:click=move |_| set_count.update(|n| *n + 1)>
-                "Count: " {count}
-            </button>
-        </div>
-    }
-}`,
-                framework: 'leptos',
-                category: 'state-management'
-            },
-            {
-                name: 'Resource Loading Pattern',
-                description: 'Pattern for loading async data using resources',
-                code_template: `
-#[component]
-fn DataLoader() -> impl IntoView {
-    let data = create_resource(
-        || (),
-        |_| async move { fetch_data().await }
-    );
-
-    view! {
-        <div>
-            <Suspense
-                fallback=move || view! { <div>"Loading..."</div> }
-            >
-                {move || data.get().map(|d| view! { <div>{d}</div> })}
-            </Suspense>
-        </div>
-    }
-}`,
-                framework: 'leptos',
-                category: 'async'
+    async fetchErrorPatterns() {
+        try {
+            // Fetch error patterns from GitHub issues
+            const { data: issues } = await this.octokit.issues.listForRepo({
+                owner: 'leptos-rs',
+                repo: 'leptos',
+                state: 'closed',
+                labels: 'bug',
+                per_page: 100
+            });
+            for (const issue of issues) {
+                if (issue.body?.includes('error[')) {
+                    const errorMatch = issue.body.match(/error\[(E\d+)\]:(.*?)(?=\n|$)/);
+                    if (errorMatch) {
+                        const [, code, message] = errorMatch;
+                        const solution = this.extractSolutionFromIssue(issue.body);
+                        if (solution) {
+                            await this.db.addErrorSolution({
+                                error_pattern: `${code}: ${message.trim()}`,
+                                solution: solution.description,
+                                example_fix: solution.code,
+                                framework: 'leptos'
+                            });
+                        }
+                    }
+                }
             }
-        ];
-        for (const pattern of patterns) {
-            await this.db.addPattern(pattern);
+        }
+        catch (error) {
+            console.error('Error fetching error patterns:', error);
         }
     }
-    async storeCommonErrors() {
-        const errors = [
-            {
-                error_pattern: 'cannot find macro `view` in this scope',
-                solution: 'Add the "leptos_macro" feature to your dependencies',
-                example_fix: `
-[dependencies]
-leptos = { version = "0.5", features = ["csr", "nightly", "leptos_macro"] }`,
-                framework: 'leptos'
-            },
-            {
-                error_pattern: 'failed to resolve: use of undeclared type or module',
-                solution: 'Import the necessary types from tauri',
-                example_fix: `
-use tauri::Manager;
-use tauri::api::shell::open;`,
-                framework: 'tauri'
+    extractSolutionFromIssue(body) {
+        // Look for solution in comments marked with "Solution:" or "Fix:"
+        const solutionMatch = body.match(/(?:Solution|Fix):\s*((?:(?!\n\n).)*(?:\n(?!\n).*)*)/s);
+        if (!solutionMatch)
+            return null;
+        const solution = solutionMatch[1];
+        const codeMatch = solution.match(/```(?:rust)?\n([\s\S]*?)\n```/);
+        return {
+            description: solution.replace(/```(?:rust)?\n[\s\S]*?\n```/g, '').trim(),
+            code: codeMatch ? codeMatch[1].trim() : undefined
+        };
+    }
+    async fetchIntegrationPatterns() {
+        try {
+            // Fetch integration examples from Tauri + Leptos repositories
+            const { data: repos } = await this.octokit.search.repos({
+                q: 'tauri leptos in:name,description,readme',
+                sort: 'stars',
+                order: 'desc',
+                per_page: 10
+            });
+            for (const repo of repos.items) {
+                if (!repo.owner?.login || !repo.name)
+                    continue;
+                try {
+                    // Get the repository's README
+                    const { data: readme } = await this.octokit.repos.getReadme({
+                        owner: repo.owner.login,
+                        repo: repo.name
+                    });
+                    if ('content' in readme) {
+                        const content = Buffer.from(readme.content, 'base64').toString();
+                        // Look for integration patterns in the README
+                        const patterns = this.extractIntegrationPatterns(content);
+                        for (const pattern of patterns) {
+                            await this.db.addPattern({
+                                name: pattern.name,
+                                description: pattern.description,
+                                code_template: pattern.code,
+                                framework: 'integration',
+                                category: 'tauri-leptos'
+                            });
+                        }
+                    }
+                }
+                catch (error) {
+                    console.error(`Error processing repo ${repo.full_name}:`, error);
+                }
             }
-        ];
-        for (const error of errors) {
-            await this.db.addErrorSolution(error);
         }
+        catch (error) {
+            console.error('Error fetching integration patterns:', error);
+        }
+    }
+    extractIntegrationPatterns(content) {
+        const patterns = [];
+        // Look for code blocks with comments describing patterns
+        const codeBlockRegex = /```(?:rust)?\n([\s\S]*?)\n```/g;
+        let match;
+        while ((match = codeBlockRegex.exec(content)) !== null) {
+            const code = match[1];
+            const precedingText = content.slice(0, match.index).split('\n').slice(-3).join('\n');
+            // Look for pattern descriptions in preceding text
+            const titleMatch = precedingText.match(/#+\s*(.*?)(?:\n|$)/);
+            const descMatch = precedingText.match(/(?:Pattern|Example):\s*(.*?)(?:\n|$)/i);
+            if (titleMatch || descMatch) {
+                patterns.push({
+                    name: titleMatch ? titleMatch[1].trim() : 'Integration Pattern',
+                    description: descMatch ? descMatch[1].trim() : 'Integration example between Tauri and Leptos',
+                    code: code.trim()
+                });
+            }
+        }
+        return patterns;
     }
 }
 //# sourceMappingURL=docFetcher.js.map

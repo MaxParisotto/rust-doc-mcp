@@ -4,6 +4,8 @@ export declare class DocFetcher {
     constructor();
     fetchLeptosDocs(): Promise<void>;
     fetchTauriDocs(): Promise<void>;
-    private storeCommonPatterns;
-    private storeCommonErrors;
+    private fetchErrorPatterns;
+    private extractSolutionFromIssue;
+    private fetchIntegrationPatterns;
+    private extractIntegrationPatterns;
 }

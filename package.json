@@ -1,18 +1,20 @@
 {
   "name": "rust-doc-mcp",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "MCP server for Rust documentation and analysis",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && chmod +x dist/index.js",
+    "clean": "rimraf dist",
+    "build": "tsc && shx chmod +x dist/*.js",
     "start": "node dist/index.js",
-    "dev": "ts-node-esm src/index.ts",
+    "dev": "NODE_OPTIONS='--loader ts-node/esm' node --experimental-specifier-resolution=node src/index.ts",
     "test": "jest",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
     "@octokit/rest": "^19.0.13",
     "axios": "^1.6.2",
     "jsdom": "^22.1.0",
@@ -20,26 +22,18 @@
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.6",
     "toml": "^3.0.0",
-    "cheerio": "^1.0.0-rc.12"
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.6",
-    "@types/node": "^20.10.0",
+    "@types/node": "22.13.5",
     "@types/sqlite3": "^3.1.11",
     "@typescript-eslint/eslint-plugin": "^6.12.0",
     "@typescript-eslint/parser": "^6.12.0",
     "eslint": "^8.54.0",
     "prettier": "^3.1.0",
     "ts-node": "^10.9.1",
-    "typescript": "^5.3.2",
-    "rimraf": "^5.0.5"
-  },
-  "scripts": {
-    "clean": "rimraf dist",
-    "build": "npm run clean && tsc && chmod +x dist/index.js && cp -r test dist/",
-    "start": "node dist/index.js",
-    "dev": "NODE_OPTIONS='--loader ts-node/esm' node --experimental-specifier-resolution=node src/index.ts",
-    "lint": "eslint src/**/*.ts",
-    "format": "prettier --write src/**/*.ts"
+    "typescript": "^5.3.2"
   }
 }

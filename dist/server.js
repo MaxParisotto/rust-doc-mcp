@@ -51,7 +51,9 @@ export class BaseServer {
         });
         // Register basic MCP methods
         this.registerHandler('initialize', async () => ({
-            server: this.serverInfo
+            protocolVersion: this.serverInfo.protocolVersion,
+            capabilities: this.serverInfo.capabilities,
+            serverInfo: { name: this.serverInfo.name, version: this.serverInfo.version }
         }));
         this.registerHandler('shutdown', async () => {
             setTimeout(() => process.exit(0), 100);
